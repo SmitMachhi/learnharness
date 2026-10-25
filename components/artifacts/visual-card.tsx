@@ -20,16 +20,41 @@ import type { ArtifactPartProps, VisualResult } from "@/src/core";
  * wrote it, verified by looking) — dangerouslySetInnerHTML is acceptable
  * here, with a cheap hygiene pass (sanitizeSvg: strip <script> blocks, on*
  * handlers, and javascript:/data:text/html URLs) since it lands in the
- * app's DOM.
+ * app's DOM. Landing in the app's DOM also means the figure's own <style>
+ * would apply to the whole page (#124: a `text{fill:#202830}` rule turned
+ * every plan-map label dark), so sanitizeSvg fences it to the figure.
  */
 
-/** Cheap SVG hygiene — not a full sanitizer, just removing the obvious exec vectors. */
+/** Cheap SVG hygiene — not a full sanitizer, just removing the obvious exec
+ *  vectors — plus the style fence (#124): every <style> body is wrapped in
+ *  `@scope` rooted at a wrapper around this figure, so its rules match only
+ *  inside it. The fence key derives from the content, so the inline card and
+ *  its fullscreen copy carry identical (harmless) rules. At-rules that define
+ *  page-global names (@keyframes, @font-face, @import, …) can't be fenced, so
+ *  every at-rule but the selector-scoped ones is renamed to an unknown one,
+ *  which the CSS parser drops whole. The maker verifies a still raster, so
+ *  it never saw an animation or web font anyway. */
 export function sanitizeSvg(svg: string): string {
-	return svg
+	const clean = svg
 		.replace(/<script[\s\S]*?<\/script\s*>/gi, "")
 		.replace(/<script[^>]*\/?>/gi, "")
 		.replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
 		.replace(/(href|xlink:href)\s*=\s*(?:"\s*(?:javascript|data:text\/html)[^"]*"|'\s*(?:javascript|data:text\/html)[^']*'|(?:javascript|data:text\/html)[^\s>]*)/gi, "");
+	let hash = 0;
+	for (let i = 0; i < clean.length; i++) hash = (hash * 31 + clean.charCodeAt(i)) | 0;
+	const key = `f${(hash >>> 0).toString(36)}`;
+	const fenced = clean.replace(
+		/(<style\b[^>]*>)([\s\S]*?)(<\/style\s*>)/gi,
+		(_, open: string, css: string, close: string) =>
+			`${open}@scope ([data-lh-figure="${key}"]) {${css.replace(
+				/@(?!(?:media|supports|container|layer|starting-style|scope)\b)([a-z-]+)/gi,
+				"@lh-dropped-$1",
+			)}}${close}`,
+	);
+	// The wrapper, not the root <svg>, is the scope root: @scope rules never
+	// match their own root, so an `svg{…}` rule needs the root svg inside it.
+	// display:contents keeps the holder's [&_svg] sizing rules working as before.
+	return `<div data-lh-figure="${key}" style="display:contents">${fenced}</div>`;
 }
 
 /** The svg root's DECLARED width in px, when there is one — the natural
@@ -88,6 +113,7 @@ export function VisualOutputCard({
 		);
 	}
 	const failed = result.svg.length === 0;
+	const safeSvg = sanitizeSvg(result.svg);
 	if (failed) {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-card-foreground" data-testid="visual-card-failed">
@@ -126,7 +152,7 @@ export function VisualOutputCard({
 						: "w-full overflow-hidden rounded-lg bg-white [&_svg]:h-auto [&_svg]:w-full"
 				}
 				style={{ filter: inverted ? "invert(1) hue-rotate(180deg)" : undefined }}
-				dangerouslySetInnerHTML={{ __html: sanitizeSvg(result.svg) }}
+				dangerouslySetInnerHTML={{ __html: safeSvg }}
 				data-testid="visual-svg"
 			/>
 			<div className="mt-2 flex items-center justify-between gap-2">
@@ -156,7 +182,7 @@ export function VisualOutputCard({
 							type="button"
 							aria-label="Open figure fullscreen"
 							title="Open fullscreen"
-							onClick={() => overlay.openFigure(result.svg, inverted)}
+							onClick={() => overlay.openFigure(safeSvg, inverted)}
 							data-testid="visual-open"
 							className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 						>

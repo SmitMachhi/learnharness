@@ -600,6 +600,53 @@ describe("sanitizeSvg", () => {
 		assert.ok(!/javascript:/i.test(clean), "javascript: urls removed");
 		assert.ok(clean.includes("circle") && clean.includes("rect"), "geometry preserved");
 	});
+
+	// #124: a figure's <style> became page-wide CSS — `text{fill:#202830}` turned
+	// every plan-map label dark. linkedom has no cascade, so these pin the
+	// fence's structure; the cascade itself was checked in Chromium.
+	const LEAKY = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><style>text{fill:#202830}</style><text>a</text></svg>';
+	const fenceKey = (html: string) => /<div data-lh-figure="(f[0-9a-z]+)" style="display:contents">/.exec(html)?.[1];
+
+	it("fences every <style> body to a wrapper keyed on the figure (#124)", () => {
+		const clean = sanitizeSvg(LEAKY.replace("</svg>", '<defs><style type="text/css">.a{stroke:red}</style></defs></svg>'));
+		const key = fenceKey(clean);
+		assert.ok(key, "the figure sits in a keyed display:contents wrapper");
+		assert.ok(clean.startsWith(`<div data-lh-figure="${key}"`) && clean.endsWith("</svg></div>"), "the wrapper encloses the whole svg");
+		assert.equal(clean.match(new RegExp(`@scope \\(\\[data-lh-figure="${key}"\\]\\) \\{`, "g"))?.length, 2, "both style blocks, root and <defs>");
+		assert.ok(clean.includes(`<style>@scope ([data-lh-figure="${key}"]) {text{fill:#202830}}</style>`), "the rule itself is untouched inside the fence");
+		assert.ok(clean.includes('<style type="text/css">@scope'), "style attributes survive");
+	});
+
+	it("page-global at-rules are renamed so the parser drops them; selector-scoped ones survive", () => {
+		const css = '@keyframes spin{to{opacity:0}}@-webkit-keyframes spin{}@font-face{font-family:"JetBrains Mono"}@import url(x.css);@media (min-width:1px){circle{fill:red}}@supports (display:grid){rect{fill:blue}}@layer l{text{fill:green}}';
+		const clean = sanitizeSvg(`<svg><style>${css}</style></svg>`);
+		for (const dropped of ["keyframes", "-webkit-keyframes", "font-face", "import"]) {
+			assert.ok(clean.includes(`@lh-dropped-${dropped}`), `@${dropped} neutralized (it would hijack page-wide names, e.g. Tailwind's spin)`);
+		}
+		assert.ok(!/@(keyframes|font-face|import)\b/.test(clean), "no global at-rule left live");
+		for (const kept of ["@media (min-width:1px)", "@supports (display:grid)", "@layer l"]) assert.ok(clean.includes(kept), `${kept} kept`);
+		assert.ok(clean.includes("@scope ([data-lh-figure="), "the fence itself is not renamed");
+	});
+
+	it("the fence key is stable per figure and differs between figures", () => {
+		assert.equal(fenceKey(sanitizeSvg(LEAKY)), fenceKey(sanitizeSvg(LEAKY)), "card and fullscreen copy share one key");
+		assert.notEqual(fenceKey(sanitizeSvg(LEAKY)), fenceKey(sanitizeSvg(LEAKY.replace(">a<", ">b<"))));
+	});
+
+	it("a figure without <style> is only wrapped; natural width and fit math still read it", () => {
+		const plain = '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><circle r="1"/></svg>';
+		const clean = sanitizeSvg(plain);
+		assert.ok(clean.includes(`>${plain}</div>`), "the svg itself is byte-identical");
+		assert.ok(!clean.includes("@scope"));
+		assert.equal(svgNaturalWidth(clean), 320);
+		assert.deepEqual(chartSize(clean), { w: 320, h: 240 });
+	});
+
+	it("the card renders the fenced figure", () => {
+		const html = renderToStaticMarkup(<VisualOutputCard output={{ svg: LEAKY }} />);
+		assert.ok(html.includes("@scope ([data-lh-figure="), "inline figure is fenced");
+		assert.ok(!/<style>text\{/.test(html), "no unfenced figure rule reaches the page");
+	});
 });
 
 // ─── 3. the demo-builder loop ────────────────────────────────────────────────

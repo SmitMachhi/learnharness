@@ -28,7 +28,7 @@ import { Hint } from "@/components/ui/hint";
 
 /** The expand seam: md-blocks' mermaid hover button calls openMermaid with
  *  the chart source; the figure card's fullscreen button calls openFigure
- *  with the raw svg (+ its invert state). The chat page (which provides
+ *  with the sanitized, style-fenced svg (+ its invert state). The chat page (which provides
  *  this context) opens the overlay. Null when no chat page is mounted
  *  (sidebar previews etc.) — the buttons simply don't render there. */
 export const SessionMermaidContext = createContext<{
@@ -68,7 +68,7 @@ export function chartSize(svg: string): { w: number; h: number } {
  *  (the plan popup's fit-floor semantics — fitGraphView/zoomedGraphView in
  *  pan-zoom.ts), Esc/X close. Renders its own copy of the chart (mermaid
  *  ids are per-render), not the injected inline svg. FIGURE MODE
- *  (2026-10-07): pass a raw `svg` instead of a mermaid `chart` — the same
+ *  (2026-10-07): pass a figure `svg` (sanitizeSvg output) instead of a mermaid `chart` — the same
  *  shell then focuses a figure card's svg on a white stage, with the
  *  caller's invert state carried over (the filter rides the white stage,
  *  exactly like the in-card holder). */
