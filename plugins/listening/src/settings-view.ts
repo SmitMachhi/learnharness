@@ -9,7 +9,7 @@ type Ctx = Pick<PluginFrontendContext, "call" | "ui" | "onNotification" | "signa
 const message = (error: unknown) => error instanceof Error && error.message ? error.message : "Something went wrong. Try again.";
 
 /**
- * Provider · API key (masked, never read back) · Voice ID · Model (live list), plus notes.
+ * ElevenLabs API key (masked, never read back) · Voice ID · Model (live list), plus notes.
  * The host stores nothing; every change goes through the backend and is published after it saves.
  */
 export function mountSettings(container: HTMLElement, hostSignal: AbortSignal, ctx: Ctx): () => void {
@@ -25,19 +25,18 @@ export function mountSettings(container: HTMLElement, hostSignal: AbortSignal, c
   readiness.setAttribute("role", "status");
   const notice = element(document, "p", "lh-listening-settings__error");
   notice.setAttribute("role", "status");
-  const providerSlot = element(document, "div", "");
   const keyBlock = element(document, "div", "lh-listening-key");
   const rowsSlot = element(document, "div", "");
   const error = element(document, "p", "lh-listening-settings__error");
   error.setAttribute("role", "alert");
   const cacheNote = element(document, "p", "lh-listening-settings__note",
-    `Generated audio is cached on this computer, up to ${SPEECH_CACHE_MAX_BYTES / (1024 * 1024)} MiB; the oldest clips are removed first. Spoken text is sent to the provider only when its audio is not cached yet. Audio generation and replay limits are described in the plugin README.`);
-  root.append(readiness, notice, providerSlot, keyBlock, rowsSlot, error, cacheNote);
+    `Generated audio is cached on this computer, up to ${SPEECH_CACHE_MAX_BYTES / (1024 * 1024)} MiB; the oldest clips are removed first. Spoken text is sent to ElevenLabs only when its audio is not cached yet. Audio generation and replay limits are described in the plugin README.`);
+  root.append(readiness, notice, keyBlock, rowsSlot, error, cacheNote);
   container.append(root);
 
   // API key: a password field that is only ever written, never filled from the backend.
   const keyLabel = element(document, "label", "lh-listening-key__label");
-  const keyName = element(document, "span", "lh-listening-key__name");
+  const keyName = element(document, "span", "lh-listening-key__name", "ElevenLabs API key");
   const keyState = element(document, "span", "lh-listening-key__state");
   keyLabel.append(keyName, keyState);
   const keyRow = element(document, "div", "lh-listening-key__row");
@@ -60,22 +59,10 @@ export function mountSettings(container: HTMLElement, hostSignal: AbortSignal, c
   let status: ListeningStatus | undefined;
   let models: ModelInfo[] | undefined;
   let modelsError: string | undefined;
-  let providerRows: PluginWidgetHandle<PluginSettingsSchema> | undefined;
   let rows: PluginWidgetHandle<PluginSettingsSchema> | undefined;
   let busy = false;
 
-  const providerLabel = () => status?.providers.find(provider => provider.id === status?.provider)?.label ?? "Provider";
   const showError = (cause: unknown) => { if (!signal.aborted) error.textContent = message(cause); };
-  const providerSchema = (current: ListeningStatus): PluginSettingsSchema => ({
-    rows: [{
-      key: "provider", type: "dropdown", label: "Provider", value: current.provider,
-      options: current.providers.map(({ id, label }) => ({ value: id, label })),
-      description: current.providers.length === 1
-        ? `The text-to-speech service that voices listening questions. ${current.providers[0]!.label} is the only one for now; more providers may be added later.`
-        : "The text-to-speech service that voices listening questions.",
-      onChange: async provider => { await save({ provider }); },
-    }],
-  });
   const rowsSchema = (current: ListeningStatus): PluginSettingsSchema => {
     const savedLabel = current.model?.label ?? current.modelId;
     const unlisted = models !== undefined && !models.some(model => model.id === current.modelId);
@@ -109,24 +96,19 @@ export function mountSettings(container: HTMLElement, hostSignal: AbortSignal, c
       : `Not ready: ${[!status.hasKey && "an API key", !status.voiceId && "a Voice ID", status.model?.id !== status.modelId && "a model"].filter(Boolean).join(", ")} still needed. The agent won't pose listening questions until then.`;
     readiness.dataset.ready = String(status.ready);
     notice.textContent = status.notice ?? "";
-    keyName.textContent = `${providerLabel()} API key`;
-    keyPermissions.hidden = status.provider !== "elevenlabs";
     keyState.textContent = status.hasKey ? "Saved" : "Not set";
     keyInput.placeholder = status.hasKey ? "Enter a new key to replace the saved one" : "Paste your API key";
     removeKey.hidden = !status.hasKey;
     saveKey.disabled = busy;
     removeKey.disabled = busy;
-    if (providerRows) providerRows.update(providerSchema(status));
-    else providerRows = ctx.ui.mountSettingsRows(providerSlot, providerSchema(status), { signal });
     if (rows) rows.update(rowsSchema(status));
     else rows = ctx.ui.mountSettingsRows(rowsSlot, rowsSchema(status), { signal });
   };
   const apply = (next: ListeningStatus) => {
     if (signal.aborted) return;
-    const providerChanged = status !== undefined && status.provider !== next.provider;
     const keyChanged = status !== undefined && status.hasKey !== next.hasKey;
     status = next;
-    if (providerChanged || keyChanged) { models = undefined; modelsError = undefined; }
+    if (keyChanged) { models = undefined; modelsError = undefined; }
     render();
     if (next.hasKey && !models && !modelsError && !loadingModels) void loadModels();
   };

@@ -7,8 +7,8 @@ import type { PluginBackendContext, PluginInstructions, PluginQuestionTypeDefini
 import { activate, type ListeningStatus } from "../src/backend.ts";
 import { definition, listeningInstructions, PROBE_TOOL, TEACH_TOOL } from "../src/contract.ts";
 import type { SpeechCache } from "../src/speech/cache.ts";
-import { createElevenLabsProvider } from "../src/speech/elevenlabs.ts";
-import type { ModelInfo, TtsProvider } from "../src/speech/provider.ts";
+import { createElevenLabsProvider, type SpeechProvider } from "../src/speech/elevenlabs.ts";
+import type { ModelInfo } from "../src/speech/provider.ts";
 
 const KEY = "sk_" + "a".repeat(40);
 const flash: ModelInfo = { id: "eleven_flash_v2_5", label: "Flash v2.5", maxTextLength: 50, languages: ["en", "es", "zh"] };
@@ -19,7 +19,7 @@ function memoryCache(): SpeechCache {
   return { get: async k => map.get(k) ?? null, put: async (k, audio, mimeType) => { map.set(k, { audio, mimeType }); } };
 }
 
-async function harness(t: { after(fn: () => Promise<unknown>): unknown }, dataDirectory?: string, synthesize?: TtsProvider["synthesize"]) {
+async function harness(t: { after(fn: () => Promise<unknown>): unknown }, dataDirectory?: string, synthesize?: SpeechProvider["synthesize"]) {
   const directory = dataDirectory ?? await fs.mkdtemp(path.join(os.tmpdir(), "lh-listening-backend-"));
   if (!dataDirectory) t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const handlers = new Map<string, (input: unknown) => unknown>();
@@ -30,7 +30,7 @@ async function harness(t: { after(fn: () => Promise<unknown>): unknown }, dataDi
   const syntheses: unknown[] = [];
   const base = createElevenLabsProvider({ fetch: async () => { throw new Error("no network in tests"); } });
   const models = [other, flash];
-  const provider: TtsProvider = {
+  const provider: SpeechProvider = {
     ...base,
     listModels: async apiKey => { assert.equal(apiKey, KEY); return [...models]; },
     synthesize: async request => { syntheses.push(request); return synthesize ? synthesize(request) : { audio: new Uint8Array([0xff, 0xfb, 9]), mimeType: "audio/mpeg" }; },
@@ -44,7 +44,7 @@ async function harness(t: { after(fn: () => Promise<unknown>): unknown }, dataDi
     registerInstructions(value: PluginInstructions) { instructions.push(value); log.push("instructions+"); return () => { log.push("instructions-"); }; },
     events: { emit(topic: string, data: unknown) { events.push([topic, data]); }, on() { return () => {}; } },
   } as unknown as PluginBackendContext;
-  const cleanup = activate(ctx, { providers: [provider], cache: memoryCache() });
+  const cleanup = activate(ctx, { provider, cache: memoryCache() });
   const call = async <T = ListeningStatus>(name: string, input?: unknown) => {
     const handler = handlers.get(name);
     if (!handler) throw new Error(`No handler ${name}`);
@@ -70,7 +70,7 @@ test("the type registers at activation; poses are refused and instructions withh
   const pose = () => validateQuestion!({ chatId: "c", variant: "probe", contractVersion: 1, input: { question: "?", payload: { audio: { text: "hola", language: "es" }, format: "recall", correctAnswer: "hi" } } } as never) ?? [];
   assert.match(pose()[0]!, /isn't set up/);
   const initial = await h.call("get-status");
-  assert.deepEqual(initial, { providers: [{ id: "elevenlabs", label: "ElevenLabs" }], provider: "elevenlabs", hasKey: false, voiceId: "", modelId: "eleven_flash_v2_5", ready: false });
+  assert.deepEqual(initial, { hasKey: false, voiceId: "", modelId: "eleven_flash_v2_5", ready: false });
   await h.call("save-key", { apiKey: KEY });
   const listed = await h.call<{ models: ModelInfo[]; status: ListeningStatus }>("list-models");
   assert.deepEqual(listed.models, [other, flash]);
@@ -100,6 +100,7 @@ test("readiness changes only swap instructions; a pending answer still validates
   assert.match(h.instructions[1]!.text, /ja/);
   await assert.rejects(h.call("save-settings", { modelId: "not-listed" }), /Reload the model list/);
   await assert.rejects(h.call("save-settings", { model: flash }), /Unknown setting/);
+  await assert.rejects(h.call("save-settings", { provider: "elevenlabs" }), /Unknown setting/, "ElevenLabs is the only provider");
   await h.call("remove-key");
   assert.equal(h.log.at(-1), "instructions-");
   const { validateAnswer, gradeAnswer } = h.questions[0]!;
@@ -124,6 +125,18 @@ test("a saved model missing from the live list is kept, never replaced silently"
   assert.equal(listed.status.modelId, other.id);
   assert.deepEqual(listed.status.model, other);
   assert.equal(listed.status.ready, true);
+  h.cleanup();
+});
+
+test("settings files saved with the old provider field still load", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lh-listening-old-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await fs.writeFile(path.join(directory, "settings.json"), JSON.stringify({ version: 1, provider: "elevenlabs", voiceId: "v", modelId: flash.id, model: flash }));
+  await fs.writeFile(path.join(directory, "credentials.json"), JSON.stringify({ version: 1, keys: { elevenlabs: KEY } }));
+  const h = await harness(t, directory);
+  const status = await h.call("get-status");
+  assert.equal(status.ready, true);
+  assert.equal(status.notice, undefined);
   h.cleanup();
 });
 
@@ -276,7 +289,7 @@ test("synthesize returns base64 audio, caches it and reports readable errors onl
 
 test("disabling the plugin cancels speech requests still running", async t => {
   // Like the real provider: hangs until its lifetime ends, then rejects with that reason.
-  const hanging: TtsProvider["synthesize"] = request => new Promise((_, reject) => {
+  const hanging: SpeechProvider["synthesize"] = request => new Promise((_, reject) => {
     request.lifetime!.addEventListener("abort", () => reject(request.lifetime!.reason), { once: true });
   });
   for (const disable of ["cleanup", "host"] as const) {

@@ -1,4 +1,4 @@
-/** Speech limits and errors shared by the backend speech service and its providers. */
+/** Speech limits and errors shared by the backend speech service and the ElevenLabs client. */
 
 /** Speeds offered to the learner. Both reuse the same recording with pitch preservation. */
 export const PLAYBACK_RATES = [1, 0.75] as const;

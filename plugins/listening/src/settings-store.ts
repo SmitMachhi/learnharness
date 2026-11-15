@@ -4,14 +4,13 @@ import path from "node:path";
 import type { ModelInfo } from "./speech/provider.ts";
 
 export interface ListeningSettings {
-  provider: string;
   voiceId: string;
   modelId: string;
   /** Snapshot of the selected model, refreshed whenever the model list loads. */
   model?: ModelInfo;
 }
 
-export const DEFAULT_SETTINGS: ListeningSettings = { provider: "elevenlabs", voiceId: "", modelId: "eleven_flash_v2_5" };
+export const DEFAULT_SETTINGS: ListeningSettings = { voiceId: "", modelId: "eleven_flash_v2_5" };
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -28,7 +27,6 @@ export function readModelInfo(value: unknown): ModelInfo | undefined {
 function readSettings(value: unknown): ListeningSettings {
   if (!isRecord(value) || value.version !== 1) throw new Error("Listening settings are unreadable.");
   const settings: ListeningSettings = {
-    provider: typeof value.provider === "string" && value.provider ? value.provider : DEFAULT_SETTINGS.provider,
     voiceId: typeof value.voiceId === "string" ? value.voiceId : DEFAULT_SETTINGS.voiceId,
     modelId: typeof value.modelId === "string" && value.modelId ? value.modelId : DEFAULT_SETTINGS.modelId,
   };

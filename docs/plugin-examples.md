@@ -239,8 +239,8 @@ question contract.
    readiness, and keeps the API key behind `ctx.handle` operations that never return it.
 2. [`src/contract.ts`](../plugins/listening/src/contract.ts): probe and teach variants,
    synchronous validation against a saved model snapshot, and observation-only grading.
-3. [`src/speech/`](../plugins/listening/src/speech/): a provider interface, the
-   ElevenLabs adapter, a deduplicating bounded service and an LRU disk cache.
+3. [`src/speech/`](../plugins/listening/src/speech/): the ElevenLabs client, a
+   deduplicating bounded service and an LRU disk cache.
 4. [`src/views.ts`](../plugins/listening/src/views.ts),
    [`src/editor.ts`](../plugins/listening/src/editor.ts) and
    [`src/playback-state.ts`](../plugins/listening/src/playback-state.ts): question and

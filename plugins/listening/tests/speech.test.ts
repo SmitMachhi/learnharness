@@ -6,9 +6,9 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createSpeechCache, type SpeechCache } from "../src/speech/cache.ts";
-import { createElevenLabsProvider } from "../src/speech/elevenlabs.ts";
+import { createElevenLabsProvider, type SpeechProvider } from "../src/speech/elevenlabs.ts";
 import { generationTimeoutMs, maxAudioBytes } from "../src/speech/limits.ts";
-import { chooseModel, type ModelInfo, type SpeechAudio, type TtsProvider } from "../src/speech/provider.ts";
+import { chooseModel, type ModelInfo, type SpeechAudio } from "../src/speech/provider.ts";
 import { createSpeechService, parseSpeechRequest, speechCacheKey, type SpeechSelection } from "../src/speech/service.ts";
 
 /** A recorded ElevenLabs reply from tests/fixtures/elevenlabs/. */
@@ -30,10 +30,10 @@ function memoryCache(): SpeechCache {
   const map = new Map<string, SpeechAudio>();
   return { get: async k => map.get(k) ?? null, put: async (k, bytes, mimeType) => { map.set(k, { audio: bytes, mimeType }); } };
 }
-function fakeProvider(synthesize: TtsProvider["synthesize"]): TtsProvider {
+function fakeProvider(synthesize: SpeechProvider["synthesize"]): SpeechProvider {
   return { ...createElevenLabsProvider({ fetch: async () => { throw new Error("no network"); } }), synthesize };
 }
-function selection(provider: TtsProvider, overrides: Partial<SpeechSelection> = {}): () => SpeechSelection {
+function selection(provider: SpeechProvider, overrides: Partial<SpeechSelection> = {}): () => SpeechSelection {
   return () => ({ provider, voiceId: "voice", modelId: model.id, model, ...overrides });
 }
 
@@ -106,7 +106,7 @@ test("audio and timeout limits scale with text length", () => {
 
 test("request keeps script and punctuation, normalizes layout whitespace and requires a language", () => {
   assert.deepEqual(parseSpeechRequest({ text: "  你好，\n 世界！ ", language: "zh" }), { text: "你好， 世界！", language: "zh" });
-  assert.deepEqual(parseSpeechRequest({ text: "Olá", language: "pt-BR" }), { text: "Olá", language: "pt" }, "providers and the cache get the base code");
+  assert.deepEqual(parseSpeechRequest({ text: "Olá", language: "pt-BR" }), { text: "Olá", language: "pt" }, "ElevenLabs and the cache get the base code");
   assert.deepEqual(parseSpeechRequest({ text: "Hola", language: "ES" }), { text: "Hola", language: "es" });
   for (const input of [null, [], {}, { text: "x" }, { text: "x", language: "" }, { text: "x", language: "en us" }, { text: " \n", language: "en" }, { text: "\u0000", language: "en" }]) {
     assert.throws(() => parseSpeechRequest(input), /invalid|empty|control/);

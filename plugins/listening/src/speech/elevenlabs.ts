@@ -1,5 +1,5 @@
 import { generationTimeoutMs, isLanguageTag, maxAudioBytes, SpeechError } from "./limits.ts";
-import { baseLanguage, type ModelInfo, type ProviderSettings, type SpeechAudio, type SynthesisRequest, type TtsProvider } from "./provider.ts";
+import { baseLanguage, type ModelInfo, type ProviderSettings, type SpeechAudio, type SynthesisRequest } from "./provider.ts";
 
 const API = "https://api.elevenlabs.io/v1";
 const OUTPUT_FORMAT = "mp3_44100_128";
@@ -106,7 +106,7 @@ function readModels(value: unknown): ModelInfo[] {
 }
 
 /** No automatic retries: a failed connection may already have been billed. */
-export function createElevenLabsProvider(options: { fetch?: typeof fetch; timeoutMs?: (text: string) => number } = {}): TtsProvider {
+export function createElevenLabsProvider(options: { fetch?: typeof fetch; timeoutMs?: (text: string) => number } = {}) {
   const fetcher = options.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
   const timeoutFor = options.timeoutMs ?? generationTimeoutMs;
 
@@ -183,3 +183,6 @@ export function createElevenLabsProvider(options: { fetch?: typeof fetch; timeou
     },
   };
 }
+
+/** The only speech provider. Add an interface back when a second one lands. */
+export type SpeechProvider = ReturnType<typeof createElevenLabsProvider>;

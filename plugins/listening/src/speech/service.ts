@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import type { SpeechCache } from "./cache.ts";
 import { codePointLength, isLanguageTag, MAX_CONCURRENT_GENERATIONS, normalizeSpokenText, SpeechError, spokenTextProblem } from "./limits.ts";
-import { baseLanguage, type ModelInfo, type SpeechAudio, type TtsProvider } from "./provider.ts";
+import type { SpeechProvider } from "./elevenlabs.ts";
+import { baseLanguage, type ModelInfo, type SpeechAudio } from "./provider.ts";
 
 export type SpeechResult = SpeechAudio & { cache: "hit" | "miss"; warning?: string };
 export interface SpeechSelection {
-  provider: TtsProvider;
+  provider: SpeechProvider;
   voiceId: string;
   modelId: string;
   model?: ModelInfo;

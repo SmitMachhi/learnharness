@@ -1,4 +1,4 @@
-/** Text-to-speech provider seam. Only ElevenLabs ships; others plug in here. */
+/** Speech types shared by the ElevenLabs client, the speech service and the settings store. */
 
 export interface SpeechAudio {
   audio: Uint8Array;
@@ -30,19 +30,6 @@ export interface SynthesisRequest {
   apiKey: string;
   /** Ends with the plugin; a request still running is cancelled. */
   lifetime?: AbortSignal;
-}
-
-export interface TtsProvider {
-  readonly id: string;
-  readonly label: string;
-  readonly preferredDefaultModel: string;
-  /** Live list of models usable for speech with this key. */
-  listModels(apiKey: string, lifetime?: AbortSignal): Promise<ModelInfo[]>;
-  /** Everything needed to synthesize, apart from the key. */
-  isReady(settings: ProviderSettings, hasKey: boolean): boolean;
-  /** Format check only; the key is never tested against the provider on save. */
-  validateKeyShape(key: string): string | undefined;
-  synthesize(request: SynthesisRequest): Promise<SpeechAudio>;
 }
 
 /** Default rule: the provider's preferred model when listed, otherwise the first. */

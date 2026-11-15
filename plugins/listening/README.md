@@ -5,20 +5,18 @@ learner can only answer by hearing synthesized speech. It works for any language
 selected voice model speaks. The spoken text stays hidden until the learner answers;
 then it appears as a transcript with replay.
 
-Speech comes from **ElevenLabs** with your own API key. The provider sits behind a
-small interface so others can be added later.
+Speech comes from **ElevenLabs** with your own API key.
 
 ## Core plugin and setup
 
 Enable Listening in **Settings → Core plugins**, then open its settings page:
 
-1. **Provider**: ElevenLabs (the only provider in this version).
-2. **API key**: paste an ElevenLabs API key and press **Save key**. Only a format check
+1. **API key**: paste an ElevenLabs API key and press **Save key**. Only a format check
    runs on save; the key is not tested against ElevenLabs.
-3. **Voice ID**: copy a Voice ID from your ElevenLabs voice library. Pick one voice that
+2. **Voice ID**: copy a Voice ID from your ElevenLabs voice library. Pick one voice that
    suits the language you are studying. One voice speaks every listening question. No
    voice ships with the plugin.
-4. **Model**: loaded live from your account (`GET /v1/models`), limited to models that
+3. **Model**: loaded live from your account (`GET /v1/models`), limited to models that
    can do text-to-speech without alpha access. The first choice defaults to
    `eleven_flash_v2_5` when your account lists it, otherwise the first model listed. A
    chosen model is never replaced automatically: if it later disappears from your
@@ -37,7 +35,7 @@ Writable plugin files live under `<learning data>/core-plugin-data/listening/`:
 
 | File | Contents |
 | --- | --- |
-| `settings.json` | Provider, Voice ID, model ID and a snapshot of the selected model's name, text limit and languages |
+| `settings.json` | Voice ID, model ID and a snapshot of the selected model's name, text limit and languages |
 | `credentials.json` | API keys per provider, owner-only (`0600`) on macOS and Linux, written atomically |
 | `cache/speech/` | Generated audio (see below) |
 
@@ -137,4 +135,4 @@ npm run typecheck
 npm run build           # writes dist/
 ```
 
-Tests use fake providers; no key or network is needed.
+Tests fake the ElevenLabs client; no key or network is needed.

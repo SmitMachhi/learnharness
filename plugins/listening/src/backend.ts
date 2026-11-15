@@ -3,15 +3,13 @@ import type { PluginBackendContext } from "learnharness-plugin-api";
 import { answerProblems, definition, gradeListening, listeningInstructions, questionProblems, type ListeningAnswer, type ListeningPayload } from "./contract.ts";
 import { createSettingsStore, isRecord, type ListeningSettings } from "./settings-store.ts";
 import { createSpeechCache, type SpeechCache } from "./speech/cache.ts";
-import { createElevenLabsProvider } from "./speech/elevenlabs.ts";
+import { createElevenLabsProvider, type SpeechProvider } from "./speech/elevenlabs.ts";
 import { SpeechError } from "./speech/limits.ts";
-import { chooseModel, type ModelInfo, type TtsProvider } from "./speech/provider.ts";
+import { chooseModel, type ModelInfo } from "./speech/provider.ts";
 import { createSpeechService } from "./speech/service.ts";
 
 /** What the settings page may see. The API key itself is never included. */
 export interface ListeningStatus {
-  providers: { id: string; label: string }[];
-  provider: string;
   hasKey: boolean;
   voiceId: string;
   modelId: string;
@@ -27,12 +25,12 @@ function record(input: unknown): Record<string, unknown> {
 }
 
 export interface ListeningBackendOptions {
-  providers?: TtsProvider[];
+  provider?: SpeechProvider;
   cache?: SpeechCache;
 }
 
 export function activate(ctx: PluginBackendContext, options: ListeningBackendOptions = {}): () => void {
-  const providers = new Map((options.providers ?? [createElevenLabsProvider()]).map(provider => [provider.id, provider]));
+  const provider = options.provider ?? createElevenLabsProvider();
   const store = createSettingsStore(ctx.dataDirectory);
   const cache = options.cache ?? createSpeechCache({ directory: path.join(ctx.dataDirectory, "cache", "speech") });
   let disposed = false;
@@ -44,21 +42,11 @@ export function activate(ctx: PluginBackendContext, options: ListeningBackendOpt
   else ctx.signal.addEventListener("abort", end, { once: true });
   const lifetime = ended.signal;
   const assertActive = () => { if (lifetime.aborted) throw lifetime.reason; };
-  const providerFor = (settings: ListeningSettings) => {
-    const provider = providers.get(settings.provider);
-    if (!provider) throw new Error(`Unknown speech provider "${settings.provider}".`);
-    return provider;
-  };
-  const isReady = (settings: ListeningSettings) => {
-    const provider = providers.get(settings.provider);
-    return provider !== undefined && provider.isReady(settings, store.hasKey(provider.id));
-  };
+  const isReady = (settings: ListeningSettings) => provider.isReady(settings, store.hasKey(provider.id));
   const status = (): ListeningStatus => {
     const settings = store.settings();
     return {
-      providers: [...providers.values()].map(({ id, label }) => ({ id, label })),
-      provider: settings.provider,
-      hasKey: store.hasKey(settings.provider),
+      hasKey: store.hasKey(provider.id),
       voiceId: settings.voiceId,
       modelId: settings.modelId,
       ...(settings.model ? { model: settings.model } : {}),
@@ -99,33 +87,29 @@ export function activate(ctx: PluginBackendContext, options: ListeningBackendOpt
 
   const speech = createSpeechService({
     cache,
-    selection: () => { const settings = store.settings(); return { ...settings, provider: providerFor(settings) }; },
+    selection: () => ({ ...store.settings(), provider }),
     key: provider => store.key(provider),
     lifetime,
   });
 
   const changed = () => { syncInstructions(); const next = status(); ctx.events.emit("status-changed", next); return next; };
 
-  /** The last live model list per provider; model choices must come from it. */
-  const listed = new Map<string, ModelInfo[]>();
+  /** The last live model list; model choices must come from it. */
+  let listed: ModelInfo[] | undefined;
 
   /** Refresh the selected model's snapshot from the live list (G15). A saved model that is
    * missing from the list is kept as it is; the settings page warns about it. */
   const listModels = async () => {
-    const settings = store.settings();
-    const provider = providerFor(settings);
     const apiKey = store.key(provider.id);
     if (!apiKey) throw new SpeechError("key_missing", `Add your ${provider.label} API key first.`);
     const models = await provider.listModels(apiKey, lifetime);
     assertActive();
-    listed.set(provider.id, models);
+    listed = models;
     const current = store.settings();
-    if (current.provider === settings.provider) {
-      const listedModel = models.find(model => model.id === current.modelId);
-      // Only a first choice uses the default rule; an existing choice is never replaced silently.
-      const selected = listedModel ?? (current.model ? undefined : chooseModel(models, current.modelId, provider.preferredDefaultModel));
-      if (selected && JSON.stringify(selected) !== JSON.stringify(current.model)) store.saveModelSnapshot({ ...current, modelId: selected.id, model: selected });
-    }
+    const listedModel = models.find(model => model.id === current.modelId);
+    // Only a first choice uses the default rule; an existing choice is never replaced silently.
+    const selected = listedModel ?? (current.model ? undefined : chooseModel(models, current.modelId, provider.preferredDefaultModel));
+    if (selected && JSON.stringify(selected) !== JSON.stringify(current.model)) store.saveModelSnapshot({ ...current, modelId: selected.id, model: selected });
     return { models, status: changed() };
   };
 
@@ -135,7 +119,6 @@ export function activate(ctx: PluginBackendContext, options: ListeningBackendOpt
       assertActive();
       const { apiKey } = record(input);
       if (typeof apiKey !== "string") throw new Error("Expected an API key.");
-      const provider = providerFor(store.settings());
       const problem = provider.validateKeyShape(apiKey);
       if (problem) throw new Error(problem);
       store.saveKey(provider.id, apiKey);
@@ -143,7 +126,7 @@ export function activate(ctx: PluginBackendContext, options: ListeningBackendOpt
     }),
     ctx.handle("remove-key", () => {
       assertActive();
-      store.removeKey(providerFor(store.settings()).id);
+      store.removeKey(provider.id);
       return changed();
     }),
     ctx.handle("save-settings", input => {
@@ -151,18 +134,14 @@ export function activate(ctx: PluginBackendContext, options: ListeningBackendOpt
       const patch = record(input);
       const current = store.settings();
       const next = { ...current };
-      for (const key of Object.keys(patch)) if (!["provider", "voiceId", "modelId"].includes(key)) throw new Error(`Unknown setting "${key}".`);
-      if (patch.provider !== undefined) {
-        if (typeof patch.provider !== "string" || !providers.has(patch.provider)) throw new Error("Unknown speech provider.");
-        if (patch.provider !== current.provider) { next.provider = patch.provider; delete next.model; }
-      }
+      for (const key of Object.keys(patch)) if (!["voiceId", "modelId"].includes(key)) throw new Error(`Unknown setting "${key}".`);
       if (patch.voiceId !== undefined) {
         if (typeof patch.voiceId !== "string" || patch.voiceId.length > 200 || /[\u0000-\u001f]/.test(patch.voiceId)) throw new Error("Enter a valid Voice ID.");
         next.voiceId = patch.voiceId.trim();
       }
       if (patch.modelId !== undefined) {
         if (typeof patch.modelId !== "string" || !patch.modelId) throw new Error("Choose a model.");
-        const model = listed.get(next.provider)?.find(candidate => candidate.id === patch.modelId);
+        const model = listed?.find(candidate => candidate.id === patch.modelId);
         if (!model) throw new Error("Reload the model list and choose a model again.");
         next.modelId = model.id;
         next.model = model;
